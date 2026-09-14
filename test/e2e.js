@@ -322,6 +322,22 @@ async function main() {
   await A2.waitFor(c => c.msgs.filter(m => m.type === 'leaderboard').at(-1).sort === 'total');
   check('非法排序维度回退总分', true);
 
+  // 本机认领：排行榜请求可随带本机密钥，响应回 myPid（服务端单向派生，密钥不落库）
+  A2.send({ type: 'leaderboard', sort: 'total', pidSecret: SECRET_A });
+  await A2.waitFor(c => c.msgs.filter(m => m.type === 'leaderboard').at(-1).myPid === PID_A);
+  check('排行榜按本机密钥回 myPid',
+    A2.msgs.filter(m => m.type === 'leaderboard').at(-1).myPid === PID_A);
+  // 与个人页同一道防伪：非法密钥/自报 pid 都不能认领
+  A2.send({ type: 'leaderboard', sort: 'total', pidSecret: 'not-a-secret' });
+  await A2.waitFor(c => c.msgs.filter(m => m.type === 'leaderboard').at(-1).myPid === null);
+  check('非法密钥不认领 myPid', true);
+  const lbCount = A2.msgs.filter(m => m.type === 'leaderboard').length;
+  A2.send({ type: 'leaderboard', sort: 'total', pid: PID_A });
+  await A2.waitFor(c => c.msgs.filter(m => m.type === 'leaderboard').length > lbCount);
+  const spoofLb = A2.msgs.filter(m => m.type === 'leaderboard').at(-1);
+  check('自报 pid 不能认领 myPid（与建房/个人页防伪一致）',
+    spoofLb.myPid === null && spoofLb.rows.length === 2);
+
   // 排行榜是公开数据：无需加入任何房间的全新连接（模拟访客）也能拉取
   const PUB = client('访客');
   await PUB.opened;

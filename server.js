@@ -533,12 +533,15 @@ const handlers = {
 
   // 赛季排行榜（公开，只读，无需任何身份/房间）：支持按总分/胜场/胜率排序。
   // 任何已建立连接的客户端都能拉取——首页排行榜入口不依赖玩家是否在房间内。
+  // 客户端可随请求带上本机密钥（与建房/个人页同一把，只在内存里单向派生、不落库），
+  // 服务端在响应里回 myPid，用于客户端高亮"我"那一行、置顶显示我的汇总。
   leaderboard(ws, ctx, msg) {
     const sort = ['total', 'wins', 'rate'].includes(msg.sort) ? msg.sort : 'total';
     const rows = seasonLib.leaderboard(season, { sort });
+    const { pid: myPid } = seasonLib.resolvePid(msg);
     if (ws.readyState === 1) {
       ws.send(JSON.stringify({ type: 'leaderboard', sort,
-        startedAt: season.startedAt, rows }));
+        startedAt: season.startedAt, rows, myPid: myPid || null }));
     }
   },
 

@@ -88,6 +88,15 @@ $id('rank-list').querySelectorAll = (sel) =>
 
 const setRows = (pids) => { rankPids = pids; };
 
+// 本机玩家（甲）密钥固定为 64 个 a，pid 取其 sha256；排行榜行用真实 pid 才能对上 myPid
+const PID_ME = require('node:crypto').createHash('sha256').update('a'.repeat(64)).digest('hex');
+const LB_MY_ROWS = [
+  { rank: 1, pid: PID_ME, name: '甲', games: 2, wins: 2, ties: 0, losses: 0,
+    totalScore: 20, avgScore: 10, bestChain: 4, winRate: 1, lastAt: 5 },
+  { rank: 2, pid: 'pidB', name: '乙', games: 2, wins: 0, ties: 0, losses: 2,
+    totalScore: 6, avgScore: 3, bestChain: 2, winRate: 0, lastAt: 5 },
+];
+
 test.after(() => { globalThis.crypto = savedCrypto; });
 
 test('从首页直接进我的战绩再返回排行榜：无缓存时补拉，不卡在加载中', () => {
@@ -210,4 +219,83 @@ test('空赛季排行榜显示空态；返回排行榜按钮不重新请求', ()
   $id('btn-rank-home').onclick();
   recv({ type: 'leaderboard', sort: 'total', startedAt: 1000, rows: [] });
   assert.match($id('rank-list').innerHTML, /还没有人完成对局/);
+});
+
+test('排行榜请求随带本机密钥，服务端回 myPid 后高亮我的行并置顶显示汇总', () => {
+  // 预设本机密钥，使本机 myPid 恰好是 pidA（甲）；测试间共享 localStorage，后续用例沿用
+  mem.wt_pid_secret = 'a'.repeat(64);
+  const crypto = require('node:crypto');
+  const myPid = crypto.createHash('sha256').update('a'.repeat(64)).digest('hex');
+
+  $id('btn-rank-home').onclick();
+  assert.ok(/^[a-f0-9]{64}$/.test(lastSent('leaderboard').pidSecret),
+    '排行榜请求应随带本机密钥以认领 myPid');
+  setRows([PID_ME, 'pidB']);
+  recv({ type: 'leaderboard', sort: 'total', startedAt: 1000, myPid, rows: LB_MY_ROWS });
+
+  // 自己那一行加 me 高亮类、昵称旁有"我"标记
+  const html = $id('rank-list').innerHTML;
+  assert.match(html, /class="rank-row me"/);
+  assert.match(html, /<span class="me-tag-inline">我<\/span>/);
+
+  // 顶部固定条：当前排序维度下的名次、总分、胜场、胜率
+  const mine = $id('rank-mine').innerHTML;
+  assert.ok(!$id('rank-mine').classList.contains('hidden'), '我的汇总条应显示');
+  assert.match(mine, /第 1 名/);
+  assert.match(mine, /20/); // 总分
+  assert.match(mine, /胜场/);
+  assert.match(mine, /100%/); // 胜率
+});
+
+test('我的汇总条随排序切换展示该维度名次；未上榜显示空态；点击定位到我的行', () => {
+  const myPid = PID_ME;
+
+  // 切到按胜场：我（甲）在该榜同样第 1
+  $id('btn-sort-wins').onclick();
+  recv({ type: 'leaderboard', sort: 'wins', startedAt: 1000, myPid, rows: [LB_MY_ROWS[0]] });
+  assert.match($id('rank-mine').innerHTML, /按胜场榜/);
+  assert.match($id('rank-mine').innerHTML, /第 1 名/);
+
+  // 点汇总条：定位到榜内自己那一行（桩无 scrollIntoView，不应报错）
+  setRows([PID_ME]);
+  assert.doesNotThrow(() => $id('rank-mine').onclick());
+
+  // 服务端未认领（密钥尚未有对局）：汇总条显示引导空态，不显示名次
+  recv({ type: 'leaderboard', sort: 'total', startedAt: 1000, myPid: null, rows: LB_MY_ROWS });
+  assert.ok(!$id('rank-mine').classList.contains('hidden'), '未上榜也保留汇总条');
+  assert.match($id('rank-mine').innerHTML, /还没有完成对局/);
+  assert.doesNotMatch($id('rank-mine').innerHTML, /第 \d+ 名/);
+});
+
+test('昵称搜索：输入即按昵称过滤，命中/无命中/清空三态', () => {
+  const myPid = PID_ME;
+  $id('btn-rank-home').onclick();
+  setRows([PID_ME, 'pidB']);
+  recv({ type: 'leaderboard', sort: 'total', startedAt: 1000, myPid, rows: LB_MY_ROWS });
+
+  // 输入"乙"：只剩乙行，不重新请求服务器（纯前端过滤）
+  const before = sentMsgs.filter(m => m.type === 'leaderboard').length;
+  const input = $id('rank-search-input');
+  input.value = '乙';
+  input.oninput({ target: input });
+  assert.strictEqual(sentMsgs.filter(m => m.type === 'leaderboard').length, before);
+  let html = $id('rank-list').innerHTML;
+  assert.match(html, /乙/);
+  assert.doesNotMatch(html, /甲/);
+  assert.doesNotMatch(html, /没有昵称包含/);
+
+  // 输入无命中的词：显示无结果提示并回显搜索词
+  input.value = '丙';
+  input.oninput({ target: input });
+  html = $id('rank-list').innerHTML;
+  assert.match(html, /没有昵称包含/);
+  assert.match(html, /丙/);
+
+  // 清空：恢复全部行，我的高亮仍在
+  input.value = '';
+  input.oninput({ target: input });
+  html = $id('rank-list').innerHTML;
+  assert.match(html, /甲/);
+  assert.match(html, /乙/);
+  assert.match(html, /class="rank-row me"/);
 });

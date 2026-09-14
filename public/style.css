@@ -266,10 +266,33 @@ button.danger-link { border: none; background: none; color: var(--danger); paddi
 .badge.fav-need-b { color: var(--danger); border-color: var(--danger); }
 
 /* 赛季排行榜 / 个人战绩 */
+.rank-mine {
+  position: sticky; top: 8px; z-index: 5;
+  margin-top: 10px;
+  background: #eef5fd; border: 1px solid #9cc3ef; border-radius: 10px;
+  padding: 10px 12px; font-size: 14px; cursor: pointer;
+}
+.rank-mine:hover { border-color: var(--accent); }
+.rank-mine-title { font-weight: 700; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+.rank-mine-title .me-tag {
+  font-size: 11px; font-weight: 400; color: #fff; background: var(--accent);
+  border-radius: 8px; padding: 1px 7px;
+}
+.rank-mine-stats { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.rank-mine-stats b { font-size: 16px; }
+.rank-mine-stats .rm-empty { color: var(--muted); font-weight: 400; }
+.rank-search { margin: 10px 0 0; }
+.rank-list { max-height: 60vh; overflow-y: auto; }
 .rank-list table { width: 100%; border-collapse: collapse; margin-top: 10px; }
 .rank-list td, .rank-list th { padding: 8px 6px; text-align: left; border-bottom: 1px solid var(--line); font-size: 14px; }
 .rank-list tr.rank-row { cursor: pointer; }
-.rank-list tr.rank-row:hover { background: #fbfaf6; }
+.rank-list tr.rank-row:hover td { background: #fbfaf6; }
+.rank-list tr.rank-row.me td { background: #eef5fd; }
+.rank-list tr.rank-row.me:hover td { background: #e3effb; }
+.me-tag-inline {
+  font-size: 11px; color: #fff; background: var(--accent);
+  border-radius: 8px; padding: 1px 7px; margin-left: 6px; vertical-align: 1px;
+}
 .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 14px 0; }
 .stat { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 8px; text-align: center; }
 .stat .stat-v { font-size: 22px; font-weight: 700; }

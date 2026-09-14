@@ -349,12 +349,16 @@
   let rankSort = 'total';   // total | wins | rate
   let rankRows = null;      // null=尚未拉取/加载中；[]=空赛季
   let rankStartedAt = null;
+  let rankMyPid = null;     // 服务端从本机密钥派生的公开 pid（用于标出"我"）
+  let rankQuery = '';       // 昵称搜索词（纯前端过滤）
   let profileData = null;   // null=尚未拉取；false=该玩家暂无已结束对局
 
   // 只读请求：socket 不可用时不发送并提示（不能写按钮禁用兜底，因为这是首页入口）
+  // 随排行榜带上本机密钥：服务端单向派生出 myPid 随响应返回，客户端据此标出自己那一行，
+  // 无需在浏览器端实现 sha256；密钥只在内存里过一遍，服务端不落库（与个人页同一路径）。
   function askLeaderboard() {
     rankRows = null;
-    if (!send({ type: 'leaderboard', sort: rankSort })) {
+    if (!send({ type: 'leaderboard', sort: rankSort, pidSecret: store.pidSecret })) {
       toast('正在连接服务器，排行榜稍后再试');
     }
     renderRank();
@@ -374,6 +378,7 @@
     rankSort = ['total', 'wins', 'rate'].includes(msg.sort) ? msg.sort : 'total';
     rankRows = Array.isArray(msg.rows) ? msg.rows : [];
     rankStartedAt = msg.startedAt || null;
+    rankMyPid = typeof msg.myPid === 'string' ? msg.myPid : null;
     renderRank();
   }
 
@@ -397,6 +402,8 @@
     else renderRank();
   }
 
+  const RANK_SORT_LABEL = { total: '总分', wins: '胜场', rate: '胜率' };
+
   function renderRank() {
     if ($('screen-rank').classList.contains('hidden')) return;
     // 当前选中的排序维度高亮；服务端按该维度返回名次
@@ -404,22 +411,68 @@
       $(id).classList.toggle('primary', key === rankSort);
     }
     $('rank-season').textContent = rankStartedAt ? `本赛季自 ${fmtDate(rankStartedAt)} 起` : '';
+    renderRankMine();
     const list = $('rank-list');
     if (rankRows === null) { list.innerHTML = '<p class="hint">排行榜加载中…</p>'; return; }
     if (!rankRows.length) { list.innerHTML = '<p class="hint">还没有人完成对局，打完一局就上榜。</p>'; return; }
+    const q = rankQuery.trim().toLowerCase();
+    const rows = q ? rankRows.filter(r => r.name.toLowerCase().includes(q)) : rankRows;
+    if (!rows.length) {
+      list.innerHTML = `<p class="hint">没有昵称包含「${esc(rankQuery.trim())}」的玩家。</p>`;
+      return;
+    }
     list.innerHTML = `<table>
       <tr><th>名次</th><th>玩家</th><th>总分</th><th>胜场</th><th>胜率</th><th>场次</th></tr>
-      ${rankRows.map(r => `<tr class="rank-row" data-pid="${esc(r.pid)}" title="查看个人战绩">
+      ${rows.map(r => {
+        const isMe = rankMyPid && r.pid === rankMyPid;
+        return `<tr class="rank-row${isMe ? ' me' : ''}" data-pid="${esc(r.pid)}" title="查看个人战绩">
         <td>${r.rank === 1 ? '🏆 ' : ''}${r.rank}</td>
-        <td>${esc(r.name)}</td>
+        <td>${esc(r.name)}${isMe ? '<span class="me-tag-inline">我</span>' : ''}</td>
         <td><b>${r.totalScore}</b></td>
         <td>${r.wins}</td>
         <td>${pct(r.winRate)}</td>
         <td>${r.games}</td>
-      </tr>`).join('')}</table>`;
+      </tr>`;
+      }).join('')}</table>`;
     list.querySelectorAll('.rank-row').forEach(tr => {
       tr.onclick = () => askProfile({ pid: tr.dataset.pid });
     });
+  }
+
+  // 顶部固定的"我的"汇总条：名次/总分/胜场/胜率随当前排序维度展示；
+  // 尚未上榜（没打完过一局）时给空态。点整条可滚动定位到榜内自己那行（搜索过滤后也能找到）。
+  function renderRankMine() {
+    const box = $('rank-mine');
+    if (rankRows === null) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    const me = rankMyPid ? rankRows.find(r => r.pid === rankMyPid) : null;
+    box.classList.remove('hidden');
+    if (!me) {
+      box.innerHTML = `<div class="rank-mine-title">我的战绩</div>
+        <div class="rank-mine-stats"><span class="rm-empty">本赛季还没有完成对局，打完一局就会在这里看到你的名次。</span></div>`;
+      box.onclick = null;
+      return;
+    }
+    box.innerHTML = `<div class="rank-mine-title">我的战绩 <span class="me-tag">我</span>
+        <span class="hint" style="margin-left:auto;font-weight:400">按${RANK_SORT_LABEL[rankSort]}榜 · 点击定位到我的行 ↑</span></div>
+      <div class="rank-mine-stats">
+        <span>名次 <b>第 ${me.rank} 名</b></span>
+        <span>总分 <b>${me.totalScore}</b></span>
+        <span>胜场 <b>${me.wins}</b></span>
+        <span>胜率 <b>${pct(me.winRate)}</b></span>
+      </div>`;
+    box.onclick = () => {
+      // 清掉搜索词，保证"我"那一行在当前列表里；再滚到可视区并闪一下
+      if (rankQuery) {
+        rankQuery = '';
+        $('rank-search-input').value = '';
+        renderRank();
+      }
+      const tr = $('rank-list').querySelectorAll('.rank-row')
+        .find(row => row.dataset.pid === rankMyPid);
+      if (tr && typeof tr.scrollIntoView === 'function') {
+        tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    };
   }
 
   function renderProfile() {
@@ -1205,6 +1258,8 @@
   $('btn-sort-total').onclick = () => { rankSort = 'total'; askLeaderboard(); };
   $('btn-sort-wins').onclick = () => { rankSort = 'wins'; askLeaderboard(); };
   $('btn-sort-rate').onclick = () => { rankSort = 'rate'; askLeaderboard(); };
+  // 昵称搜索：纯前端过滤已拉取的榜单，人多时不用翻表；输入即过滤，大小写不敏感
+  $('rank-search-input').oninput = (e) => { rankQuery = e.target.value || ''; renderRank(); };
   $('btn-rank-back').onclick = () => showScreen('home');
   $('btn-rank-my').onclick = () => askProfile({ pidSecret: store.pidSecret });
   $('btn-profile-back-rank').onclick = backToRank;
