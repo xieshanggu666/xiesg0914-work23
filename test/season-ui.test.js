@@ -37,11 +37,24 @@ function rankRowEl(pid) {
   if (!rowEls.has(pid)) {
     const el = makeEl();
     el.dataset.pid = pid;
+    // 记录 scrollIntoView 调用：置顶条点击定位用（带 block/behavior 参数）
+    el.scrollCalls = [];
+    el.scrollIntoView = function (opts) { this.scrollCalls.push(opts || null); };
     rowEls.set(pid, el);
   }
   return rowEls.get(pid);
 }
 let rankPids = [];
+
+// 仿真浏览器 NodeList：有 length/下标/forEach，但没有 find/map 等数组方法。
+// 曾出过"对 querySelectorAll 结果直接 .find"的线上 bug（桩返回真数组没测出来），
+// 这里刻意与真实 DOM 对齐，防止同类问题复发。
+function nodeList(arr) {
+  const nl = { length: arr.length };
+  arr.forEach((v, i) => { nl[i] = v; });
+  nl.forEach = (fn) => arr.forEach(fn);
+  return nl;
+}
 
 const SCREENS = ['screen-home', 'screen-lobby', 'screen-game', 'screen-end',
   'screen-practice', 'screen-practice-game', 'screen-fav', 'screen-review',
@@ -82,9 +95,9 @@ require('../public/client.js');
 const recv = (msg) => clientWs.onmessage({ data: JSON.stringify(msg) });
 const lastSent = (type) => sentMsgs.filter(m => m.type === type).at(-1);
 
-// 排行榜容器：按当前响应里出现的 pid 暴露动态行
+// 排行榜容器：按当前响应里出现的 pid 暴露动态行（NodeList 仿真，无 find）
 $id('rank-list').querySelectorAll = (sel) =>
-  sel === '.rank-row' ? rankPids.map(pid => rankRowEl(pid)) : [];
+  sel === '.rank-row' ? nodeList(rankPids.map(pid => rankRowEl(pid))) : nodeList([]);
 
 const setRows = (pids) => { rankPids = pids; };
 
@@ -182,7 +195,9 @@ test('排行榜：打开即请求，切换三种排序，点玩家行进其个�
     { rank: 2, pid: 'pidB', name: '乙', games: 2, wins: 0, ties: 0, losses: 2,
       totalScore: 6, avgScore: 3, bestChain: 2, winRate: 0, lastAt: 5 },
   ] });
-  $id('rank-list').querySelectorAll('.rank-row').find(r => r.dataset.pid === 'pidB').onclick();
+  const rowB = Array.from($id('rank-list').querySelectorAll('.rank-row'))
+    .find(r => r.dataset.pid === 'pidB');
+  rowB.onclick();
   assert.strictEqual(lastSent('profile').pid, 'pidB');
   assert.strictEqual(lastSent('profile').pidSecret, undefined);
   assert.strictEqual($id('screen-profile').classList.contains('hidden'), false);
@@ -256,9 +271,25 @@ test('我的汇总条随排序切换展示该维度名次；未上榜显示空�
   assert.match($id('rank-mine').innerHTML, /按胜场榜/);
   assert.match($id('rank-mine').innerHTML, /第 1 名/);
 
-  // 点汇总条：定位到榜内自己那一行（桩无 scrollIntoView，不应报错）
+  // 点汇总条：滚动定位到榜内自己那一行（NodeList 无 find，曾经因此抛错失效）
   setRows([PID_ME]);
+  rankRowEl(PID_ME).scrollCalls = [];
   assert.doesNotThrow(() => $id('rank-mine').onclick());
+  assert.strictEqual(rankRowEl(PID_ME).scrollCalls.length, 1, '应对我的行调用 scrollIntoView');
+  assert.deepStrictEqual(rankRowEl(PID_ME).scrollCalls[0],
+    { block: 'center', behavior: 'smooth' });
+
+  // 搜索词把我的行过滤掉时点汇总条：先清词重渲染，再滚到我的行
+  recv({ type: 'leaderboard', sort: 'total', startedAt: 1000, myPid, rows: LB_MY_ROWS });
+  setRows([PID_ME, 'pidB']);
+  const input = $id('rank-search-input');
+  input.value = '乙';
+  input.oninput({ target: input });
+  rankRowEl(PID_ME).scrollCalls = [];
+  assert.doesNotThrow(() => $id('rank-mine').onclick());
+  assert.strictEqual(input.value, '', '点击置顶条应清掉昵称搜索词');
+  // 清词后列表重建为完整榜单，我的行重新出现并被定位
+  assert.strictEqual(rankRowEl(PID_ME).scrollCalls.length, 1);
 
   // 服务端未认领（密钥尚未有对局）：汇总条显示引导空态，不显示名次
   recv({ type: 'leaderboard', sort: 'total', startedAt: 1000, myPid: null, rows: LB_MY_ROWS });

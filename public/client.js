@@ -467,7 +467,9 @@
         $('rank-search-input').value = '';
         renderRank();
       }
-      const tr = $('rank-list').querySelectorAll('.rank-row')
+      // querySelectorAll 返回的是 NodeList（只有 forEach，没有 find），
+      // 直接 .find 会抛 TypeError 导致定位失效；先转数组
+      const tr = Array.from($('rank-list').querySelectorAll('.rank-row'))
         .find(row => row.dataset.pid === rankMyPid);
       if (tr && typeof tr.scrollIntoView === 'function') {
         tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
